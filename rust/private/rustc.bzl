@@ -350,9 +350,29 @@ def rustc_compile_action(
         collect_data = True,
     )
 
+    proj_file = ctx.actions.declare_file(
+        "{}.project".format(ctx.attr.name), 
+    )
+
+    proj_outs = ctx.label.package + "/" + crate_info.root.path + "\n" + "\n".join([(dep.label.package + ":" + dep.label.name) for dep in ctx.attr.deps])
+
+    ctx.actions.write(
+        output = proj_file,
+        content = proj_outs,
+        is_executable = False,
+    )
+
+    transitive = []
+    for dep in crate_info.deps:
+        if OutputGroupInfo in dep and "analyzer_files" in dep[OutputGroupInfo]:
+            transitive.append(dep[OutputGroupInfo].analyzer_files)
+
+    all_analyzer_files = depset([proj_file], transitive = transitive)
+
     return [
         crate_info,
         dep_info,
+        OutputGroupInfo(analyzer_files = all_analyzer_files),
         DefaultInfo(
             # nb. This field is required for cc_library to depend on our output.
             files = depset([crate_info.output]),
