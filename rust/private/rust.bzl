@@ -220,6 +220,34 @@ def _rust_test_common(ctx, test_binary):
 def _rust_test_impl(ctx):
     return _rust_test_common(ctx, ctx.outputs.executable)
 
+
+ProjectInfo = provider(
+    fields = {
+        "project_file" : "depset[File]",
+    }
+)
+def _rust_analyzer_project_impl(ctx):
+    proj_file = ctx.actions.declare_file(
+        "{}.project".format(ctx.attr.name), 
+    )
+
+    # TODO need an alternate for main.rs
+    crate_root = "src/lib.rs"
+    if ctx.attr.crate_root:
+        crate_root = ctx.attr.crate_root.label.name
+    outs = ctx.label.package + "/" + crate_root + "\n" + "\n".join([(dep.label.package + ":" + dep.label.name) for dep in ctx.attr.deps])
+
+    #print(outs)
+
+    ctx.actions.write(
+        output = proj_file,
+        content = outs,
+        is_executable = False,
+    )
+
+    return DefaultInfo(files=depset([proj_file]))
+    #return ProjectInfo(project_file=depset([proj_file]))
+
 def _rust_benchmark_impl(ctx):
     bench_script = ctx.outputs.executable
 
@@ -698,6 +726,31 @@ rust_test(
 ```
 
 Run the test with `bazel build //hello_lib:hello_lib_test`.
+""",
+)
+
+rust_analyzer_project = rule(
+    _rust_analyzer_project_impl,
+    attrs = {
+        "deps": attr.label_list(
+            doc = _tidy("""
+                List of other `rust_library` libraries to be linked to this target.
+            """),
+        ),
+
+        "crate_root": attr.label(
+            doc = _tidy("""
+                The file that will be passed to `rustc` to be used for building this crate.
+
+                If `crate_root` is not set, then this rule will look for a `lib.rs` file (or `main.rs` for rust_binary)
+                or the single file in `srcs` if `srcs` contains only one file.
+            """),
+            allow_single_file = [".rs"],
+        ),
+    },
+
+    doc = """
+Foo
 """,
 )
 
