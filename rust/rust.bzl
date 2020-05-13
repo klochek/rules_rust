@@ -18,6 +18,7 @@ load(
     _rust_binary = "rust_binary",
     _rust_library = "rust_library",
     _rust_test = "rust_test",
+    _rust_analyzer_project = "rust_analyzer_project",
 )
 load(
     "@io_bazel_rules_rust//rust:private/rustdoc.bzl",
@@ -26,6 +27,17 @@ load(
 load(
     "@io_bazel_rules_rust//rust:private/rustdoc_test.bzl",
     _rust_doc_test = "rust_doc_test",
+)
+
+load(
+    "@io_bazel_rules_rust//rust:private/rustc.bzl",
+    _rustc_compile_action = "rustc_compile_action",
+    _CrateInfo = "CrateInfo",
+)
+
+load(
+    "@io_bazel_rules_rust//rust:private/utils.bzl", 
+    _find_toolchain = "find_toolchain",
 )
 
 rust_library = _rust_library
@@ -45,3 +57,12 @@ rust_doc = _rust_doc
 
 rust_doc_test = _rust_doc_test
 """ See @io_bazel_rules_rust//rust:private/rustdoc.bzl for a complete description. """
+
+rust_analyzer_project = _rust_analyzer_project
+""" See @io_bazel_rules_rust//rust:private/rustdoc.bzl for a complete description. """
+
+rustc_compile_action = _rustc_compile_action
+
+CrateInfo = _CrateInfo
+
+find_toolchain = _find_toolchain
