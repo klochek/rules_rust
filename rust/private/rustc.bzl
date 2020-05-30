@@ -345,16 +345,18 @@ def rustc_compile_action(
             crate_info.type, ctx.label.name, formatted_version, len(crate_info.srcs)
         ),
     )
+
     runfiles = ctx.runfiles(
         files = dep_info.transitive_dylibs.to_list() + getattr(ctx.files, "data", []),
         collect_data = True,
     )
 
+    # project file generation (intermediate form) for eventual rust analyzer
     proj_file = ctx.actions.declare_file(
         "{}.project".format(ctx.attr.name), 
     )
 
-    proj_outs = ctx.label.package + "/" + crate_info.root.path + "\n" + "\n".join([(dep.label.package + ":" + dep.label.name) for dep in ctx.attr.deps])
+    proj_outs = "//" + ctx.label.package + "_" + ctx.label.name + ":" + crate_info.root.path + "\n" + "\n".join([("//" + dep.label.package + "_" + dep.label.name + ":" + dep.label.name) for dep in ctx.attr.deps])
 
     ctx.actions.write(
         output = proj_file,
@@ -368,6 +370,7 @@ def rustc_compile_action(
             transitive.append(dep[OutputGroupInfo].analyzer_files)
 
     all_analyzer_files = depset([proj_file], transitive = transitive)
+    ###
 
     return [
         crate_info,
