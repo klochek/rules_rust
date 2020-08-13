@@ -19,9 +19,9 @@ local_repository(
 
 http_archive(
     name = "bazel_skylib",
-    sha256 = "eb5c57e4c12e68c0c20bc774bfbc60a568e800d025557bc4ea022c6479acc867",
-    strip_prefix = "bazel-skylib-0.6.0",
-    url = "https://github.com/bazelbuild/bazel-skylib/archive/0.6.0.tar.gz",
+    sha256 = "12ee3a5732e8c353fce4a710dbe045a16a161c49c79622faa1f2813f668bb442",
+    strip_prefix = "bazel-skylib-8f3151fb4a91d5f2ae4cad5901ea72fe30a2aba0",
+    url = "https://github.com/bazelbuild/bazel-skylib/archive/8f3151fb4a91d5f2ae4cad5901ea72fe30a2aba0.tar.gz",  # 2020-07-10
 )
 
 # TODO: Move this to examples/WORKSPACE when recursive repositories are enabled.
@@ -43,19 +43,6 @@ rust_bindgen_repositories()
 
 load("@io_bazel_rules_rust//wasm_bindgen:repositories.bzl", "rust_wasm_bindgen_repositories")
 rust_wasm_bindgen_repositories()
-
-# Stardoc and its dependencies
-http_archive(
-    name = "io_bazel_stardoc",
-    urls = [
-        "https://github.com/bazelbuild/stardoc/archive/f13e3cac7022bd8bdd32233d1dae95a56df01a51.zip",
-    ],
-    sha256 = "d698a413eaaf473c27d57654e4726ddfaab3e29280294ae2d8e11c4cb6f29b5e",
-    strip_prefix = "stardoc-f13e3cac7022bd8bdd32233d1dae95a56df01a51",
-)
-
-load("@io_bazel_stardoc//:setup.bzl", "stardoc_repositories")
-stardoc_repositories()
 
 http_archive(
     name = "build_bazel_rules_nodejs",
@@ -99,3 +86,6 @@ rbe_autoconfig(
 
 load("@io_bazel_rules_rust//:workspace.bzl", "bazel_version")
 bazel_version(name = "bazel_version")
+
+load("@examples//hello_sys:workspace.bzl", "remote_deps")
+remote_deps()

@@ -1,11 +1,11 @@
 load(":known_shas.bzl", "FILE_KEY_TO_SHA")
-load("//rust/platform:triple_mappings.bzl", "system_to_binary_ext", "system_to_dylib_ext", "system_to_staticlib_ext", "triple_to_constraint_set", "triple_to_system")
+load("//rust/platform:triple_mappings.bzl", "system_to_binary_ext", "system_to_dylib_ext", "system_to_staticlib_ext", "system_to_stdlib_linkflags", "triple_to_constraint_set", "triple_to_system")
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 DEFAULT_TOOLCHAIN_NAME_PREFIX = "toolchain_for"
 
-def rust_repositories(version="1.39.0", iso_date=None, rustfmt_version="1.4.8"):
+def rust_repositories(version = "1.44.0", iso_date = None, rustfmt_version = "1.4.8", edition = None, dev_components = False):
     """Emits a default set of toolchains for Linux, OSX, and Freebsd
 
     Skip this macro and call the `rust_repository_set` macros directly if you need a compiler for
@@ -15,7 +15,12 @@ def rust_repositories(version="1.39.0", iso_date=None, rustfmt_version="1.4.8"):
       version: The version of Rust. Either "nightly", "beta", or an exact version.
       rustfmt_version: The version of rustfmt. Either "nightly", "beta", or an exact version.
       iso_date: The date of the nightly or beta release (or None, if the version is a specific version).
+      edition: The rust edition to be used by default (2015 (default) or 2018)
+      dev_components: Whether to download the rustc-dev components (defaults to False). Requires version to be "nightly".
     """
+
+    if dev_components and version != "nightly":
+        fail("Rust version must be set to \"nightly\" to enable rustc-dev components")
 
     maybe(
         http_archive,
@@ -33,6 +38,8 @@ def rust_repositories(version="1.39.0", iso_date=None, rustfmt_version="1.4.8"):
         version = version,
         iso_date = iso_date,
         rustfmt_version = rustfmt_version,
+        edition = edition,
+        dev_components = dev_components,
     )
 
     rust_repository_set(
@@ -42,11 +49,24 @@ def rust_repositories(version="1.39.0", iso_date=None, rustfmt_version="1.4.8"):
         version = version,
         iso_date = iso_date,
         rustfmt_version = rustfmt_version,
+        edition = edition,
+        dev_components = dev_components,
     )
 
     rust_repository_set(
         name = "rust_freebsd_x86_64",
         exec_triple = "x86_64-unknown-freebsd",
+        extra_target_triples = ["wasm32-unknown-unknown"],
+        version = version,
+        iso_date = iso_date,
+        rustfmt_version = rustfmt_version,
+        edition = edition,
+        dev_components = dev_components,
+    )
+
+    rust_repository_set(
+        name = "rust_windows_x86_64",
+        exec_triple = "x86_64-pc-windows-msvc",
         extra_target_triples = ["wasm32-unknown-unknown"],
         version = version,
         iso_date = iso_date,
@@ -87,10 +107,14 @@ filegroup(
 
 filegroup(
     name = "rustc_lib",
-    srcs = glob([
-        "lib/*{dylib_ext}",
-        "lib/rustlib/{target_triple}/codegen-backends/*{dylib_ext}",
-    ]),
+    srcs = glob(
+        [
+            "bin/*{dylib_ext}",
+            "lib/*{dylib_ext}",
+            "lib/rustlib/{target_triple}/codegen-backends/*{dylib_ext}",
+        ],
+        allow_empty = True,
+    ),
     visibility = ["//visibility:public"],
 )
 
@@ -107,7 +131,7 @@ filegroup(
     )
 
 def BUILD_for_rustfmt(target_triple):
-    """Emits a BUILD file the compiler .tar.gz."""
+    """Emits a BUILD file the rustfmt .tar.gz."""
 
     system = triple_to_system(target_triple)
     return """
@@ -126,10 +150,21 @@ sh_binary(
 )
 """.format(
         binary_ext = system_to_binary_ext(system),
-        staticlib_ext = system_to_staticlib_ext(system),
-        dylib_ext = system_to_dylib_ext(system),
-        target_triple = target_triple,
     )
+
+def BUILD_for_clippy(target_triple):
+    """Emits a BUILD file the clippy's extracted files."""
+
+    system = triple_to_system(target_triple)
+    return """
+load("@io_bazel_rules_rust//rust:toolchain.bzl", "rust_toolchain")
+
+filegroup(
+    name = "clippy_driver_bin",
+    srcs = ["bin/clippy-driver{binary_ext}"],
+    visibility = ["//visibility:public"],
+)
+""".format(binary_ext = system_to_binary_ext(system))
 
 def BUILD_for_stdlib(target_triple):
     """Emits a BUILD file the stdlib .tar.gz."""
@@ -156,7 +191,8 @@ filegroup(
         target_triple = target_triple,
     )
 
-def BUILD_for_rust_toolchain(workspace_name, name, exec_triple, target_triple, default_edition = "2015"):
+def BUILD_for_rust_toolchain(workspace_name, name, exec_triple, target_triple,
+                             stdlib_linkflags=None, default_edition = "2015"):
     """Emits a toolchain declaration to match an existing compiler and stdlib.
 
     Args:
@@ -164,9 +200,12 @@ def BUILD_for_rust_toolchain(workspace_name, name, exec_triple, target_triple, d
       name: The name of the toolchain declaration
       exec_triple: The rust-style target that this compiler runs on
       target_triple: The rust-style target triple of the tool
+      stdlib_linkflags: Overriden flags needed for linking to rust stdlib, akin to BAZEL_LINKLIBS
     """
 
     system = triple_to_system(target_triple)
+    if stdlib_linkflags == None:
+        stdlib_linkflags = ", ".join(['"%s"' % x for x in system_to_stdlib_linkflags(system)])
 
     return """
 rust_toolchain(
@@ -175,9 +214,12 @@ rust_toolchain(
     rust_lib = "@{workspace_name}//:rust_lib-{target_triple}",
     rustc = "@{workspace_name}//:rustc",
     rustfmt = "@{workspace_name}//:rustfmt_bin",
+    clippy_driver = "@{workspace_name}//:clippy_driver_bin",
     rustc_lib = "@{workspace_name}//:rustc_lib",
+    binary_ext = "{binary_ext}",
     staticlib_ext = "{staticlib_ext}",
     dylib_ext = "{dylib_ext}",
+    stdlib_linkflags = [{stdlib_linkflags}],
     os = "{system}",
     default_edition = "{default_edition}",
     exec_triple = "{exec_triple}",
@@ -187,8 +229,10 @@ rust_toolchain(
 """.format(
         toolchain_name = name,
         workspace_name = workspace_name,
+        binary_ext = system_to_binary_ext(system),
         staticlib_ext = system_to_staticlib_ext(system),
         dylib_ext = system_to_dylib_ext(system),
+        stdlib_linkflags = stdlib_linkflags,
         system = system,
         default_edition = default_edition,
         exec_triple = exec_triple,
@@ -237,7 +281,7 @@ def produce_tool_path(tool_name, target_triple, version):
 
     return "{}-{}-{}".format(tool_name, version, target_triple)
 
-def load_arbitrary_tool(ctx, tool_name, param_prefix, tool_subdirectory, version, iso_date, target_triple, sha256=""):
+def load_arbitrary_tool(ctx, tool_name, tool_subdirectories, version, iso_date, target_triple, sha256 = ""):
     """Loads a Rust tool, downloads, and extracts into the common workspace.
 
     This function sources the tool from the Rust-lang static file server. The index is available
@@ -248,15 +292,24 @@ def load_arbitrary_tool(ctx, tool_name, param_prefix, tool_subdirectory, version
       ctx: A repository_ctx (no attrs required).
       tool_name: The name of the given tool per the archive naming.
       param_prefix: The name of the versioning param if the repository rule supports multiple tools.
-      tool_subdirectory: The subdirectory of the tool files (wo level below the root directory of
-                         the archive. The root directory of the archive is expected to match
-                         $TOOL_NAME-$VERSION-$TARGET_TRIPLE.
+      tool_subdirectories: The subdirectories of the tool files (at a level below the root directory of
+                           the archive). The root directory of the archive is expected to match
+                           $TOOL_NAME-$VERSION-$TARGET_TRIPLE.
+                           Example:
+                              tool_name
+                              |    version
+                              |    |      target_triple
+                              v    v      v
+                              rust-1.39.0-x86_64-unknown-linux-gnu/clippy-preview
+                                                               .../rustc
+                                                               .../etc
+                              tool_subdirectories = ["clippy-preview", "rustc"]
       version: The version of the tool among "nightly", "beta', or an exact version.
       iso_date: The date of the tool (or None, if the version is a specific version).
       target_triple: The rust-style target triple of the tool
     """
 
-    _check_version_valid(version, iso_date, param_prefix)
+    _check_version_valid(version, iso_date, param_prefix = tool_name + "_")
 
     # N.B. See https://static.rust-lang.org/dist/index.html to find the tool_suburl for a given
     # tool.
@@ -265,12 +318,18 @@ def load_arbitrary_tool(ctx, tool_name, param_prefix, tool_subdirectory, version
     url = "{}/dist/{}.tar.gz".format(static_rust, tool_suburl)
 
     tool_path = produce_tool_path(tool_name, target_triple, version)
-    ctx.download_and_extract(
+    archive_path = tool_path + ".tar.gz"
+    ctx.download(
         url,
-        output = "",
+        output = archive_path,
         sha256 = FILE_KEY_TO_SHA.get(tool_suburl) or sha256,
-        stripPrefix = "{}/{}".format(tool_path, tool_subdirectory),
     )
+    for subdirectory in tool_subdirectories:
+        ctx.extract(
+            archive_path,
+            output = "",
+            stripPrefix = "{}/{}".format(tool_path, subdirectory),
+        )
 
 def _load_rustfmt(ctx):
     target_triple = ctx.attr.exec_triple
@@ -283,10 +342,9 @@ def _load_rustfmt(ctx):
     load_arbitrary_tool(
         ctx,
         iso_date = iso_date,
-        param_prefix = "rustfmt_",
         target_triple = target_triple,
         tool_name = "rustfmt",
-        tool_subdirectory = "rustfmt-preview",
+        tool_subdirectories = ["rustfmt-preview"],
         version = ctx.attr.rustfmt_version,
     )
 
@@ -305,14 +363,13 @@ def _load_rust_compiler(ctx):
     load_arbitrary_tool(
         ctx,
         iso_date = ctx.attr.iso_date,
-        param_prefix = "rustc_",
         target_triple = target_triple,
-        tool_name = "rustc",
-        tool_subdirectory = "rustc",
+        tool_name = "rust",
+        tool_subdirectories = ["rustc", "clippy-preview"],
         version = ctx.attr.version,
     )
 
-    compiler_BUILD = BUILD_for_compiler(target_triple)
+    compiler_BUILD = BUILD_for_compiler(target_triple) + BUILD_for_clippy(target_triple)
 
     return compiler_BUILD
 
@@ -329,15 +386,19 @@ def _load_rust_stdlib(ctx, target_triple):
     load_arbitrary_tool(
         ctx,
         iso_date = ctx.attr.iso_date,
-        param_prefix = "rust-std_",
         target_triple = target_triple,
         tool_name = "rust-std",
-        tool_subdirectory = "rust-std-{}".format(target_triple),
+        tool_subdirectories = ["rust-std-{}".format(target_triple)],
         version = ctx.attr.version,
     )
 
     toolchain_prefix = ctx.attr.toolchain_name_prefix or DEFAULT_TOOLCHAIN_NAME_PREFIX
     stdlib_BUILD = BUILD_for_stdlib(target_triple)
+
+    stdlib_linkflags = None
+    if 'BAZEL_RUST_STDLIB_LINKFLAGS' in ctx.os.environ:
+        stdlib_linkflags = ctx.os.environ['BAZEL_RUST_STDLIB_LINKFLAGS'].split(':')
+
     toolchain_BUILD = BUILD_for_rust_toolchain(
         name = "{toolchain_prefix}_{target_triple}".format(
             toolchain_prefix = toolchain_prefix,
@@ -345,10 +406,50 @@ def _load_rust_stdlib(ctx, target_triple):
         ),
         exec_triple = ctx.attr.exec_triple,
         target_triple = target_triple,
+        stdlib_linkflags = stdlib_linkflags,
         workspace_name = ctx.attr.name,
+        default_edition = ctx.attr.edition,
     )
 
     return stdlib_BUILD + toolchain_BUILD
+
+def _load_rustc_dev_nightly(ctx, target_triple):
+    """Loads the nightly rustc dev component
+
+    Args:
+      ctx: A repository_ctx.
+      target_triple: The rust-style target triple of the tool
+    """
+
+    load_arbitrary_tool(
+        ctx,
+        iso_date = ctx.attr.iso_date,
+        target_triple = target_triple,
+        tool_name = "rustc-dev",
+        tool_subdirectories = ["rustc-dev-{}".format(target_triple)],
+        version = ctx.attr.version,
+    )
+
+    return
+
+def _load_llvm_tools(ctx, target_triple):
+    """Loads the llvm tools
+
+    Args:
+      ctx: A repository_ctx.
+      target_triple: The rust-style target triple of the tool
+    """
+
+    load_arbitrary_tool(
+        ctx,
+        iso_date = ctx.attr.iso_date,
+        target_triple = target_triple,
+        tool_name = "llvm-tools",
+        tool_subdirectories = ["llvm-tools-preview"],
+        version = ctx.attr.version,
+    )
+
+    return
 
 def _rust_toolchain_repository_impl(ctx):
     """The implementation of the rust toolchain repository rule."""
@@ -360,8 +461,16 @@ def _rust_toolchain_repository_impl(ctx):
     if ctx.attr.rustfmt_version:
         BUILD_components.append(_load_rustfmt(ctx))
 
+    # Nightly Rust builds after 2020-05-22 need the llvm-tools gzip to get the libLLVM dylib
+    if ctx.attr.version == "nightly" and ctx.attr.iso_date > "2020-05-22":
+            _load_llvm_tools(ctx, ctx.attr.exec_triple)
+
     for target_triple in [ctx.attr.exec_triple] + ctx.attr.extra_target_triples:
         BUILD_components.append(_load_rust_stdlib(ctx, target_triple))
+
+        # extra_target_triples contains targets such as wasm, which don't have rustc_dev components
+        if ctx.attr.dev_components and target_triple not in ctx.attr.extra_target_triples:
+            _load_rustc_dev_nightly(ctx, target_triple)
 
     ctx.file("WORKSPACE", "")
     ctx.file("BUILD", "\n".join(BUILD_components))
@@ -391,11 +500,13 @@ selection from toolchain fetching
 
 Args:
   name: A unique name for this rule
+  version: The version of the tool among "nightly", "beta', or an exact version.
+  rustfmt_version: The version of rustfmt to be associated with the toolchain.
+  iso_date: The date of the tool (or None, if the version is a specific version).
   exec_triple: The Rust-style target triple for the compilation platform
   extra_target_triples: The Rust-style triples for extra compilation targets
   toolchain_name_prefix: The per-target prefix expected for the rust_toolchain declarations
-  version: The version of the tool among "nightly", "beta', or an exact version.
-  iso_date: The date of the tool (or None, if the version is a specific version).
+  edition: The rust edition to be used by default (2015 (default) or 2018)
 """
 
 rust_toolchain_repository = repository_rule(
@@ -406,6 +517,8 @@ rust_toolchain_repository = repository_rule(
         "exec_triple": attr.string(mandatory = True),
         "extra_target_triples": attr.string_list(),
         "toolchain_name_prefix": attr.string(),
+        "edition": attr.string(default = "2015"),
+        "dev_components": attr.bool(default = False),
     },
     implementation = _rust_toolchain_repository_impl,
 )
@@ -432,7 +545,15 @@ rust_toolchain_repository_proxy = repository_rule(
     implementation = _rust_toolchain_repository_proxy_impl,
 )
 
-def rust_repository_set(name, version, exec_triple, extra_target_triples = [], iso_date = None, rustfmt_version = None):
+def rust_repository_set(
+        name,
+        version,
+        exec_triple,
+        extra_target_triples = [],
+        iso_date = None,
+        rustfmt_version = None,
+        edition = None,
+        dev_components = False):
     """Assembles a remote repository for the given toolchain params, produces a proxy repository
     to contain the toolchain declaration, and registers the toolchains.
 
@@ -446,6 +567,10 @@ def rust_repository_set(name, version, exec_triple, extra_target_triples = [], i
       exec_triple: The Rust-style target that this compiler runs on
       extra_target_triples: Additional rust-style targets that this set of toolchains
                             should support.
+      rustfmt_version: The version of rustfmt to be associated with the toolchain.
+      edition: The rust edition to be used by default (2015 (default) or 2018)
+      dev_components: Whether to download the rustc-dev components (defaults to False).
+                      Requires version to be "nightly".
     """
 
     rust_toolchain_repository(
@@ -456,6 +581,8 @@ def rust_repository_set(name, version, exec_triple, extra_target_triples = [], i
         toolchain_name_prefix = DEFAULT_TOOLCHAIN_NAME_PREFIX,
         version = version,
         rustfmt_version = rustfmt_version,
+        edition = edition,
+        dev_components = dev_components,
     )
 
     rust_toolchain_repository_proxy(

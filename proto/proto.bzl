@@ -43,7 +43,6 @@ load(
 )
 load("@io_bazel_rules_rust//rust:private/rustc.bzl", "CrateInfo", "rustc_compile_action")
 load("@io_bazel_rules_rust//rust:private/utils.bzl", "find_toolchain")
-load("@io_bazel_rules_rust//rust:private/transitions.bzl", "proc_macro_host_transition")
 
 RustProtoProvider = provider(
     fields = {
@@ -168,10 +167,12 @@ def _rust_proto_compile(protos, descriptor_sets, imports, crate_name, ctx, grpc,
             root = lib_rs,
             srcs = srcs,
             deps = compile_deps,
+            proc_macro_deps = [],
             aliases = {},
             output = rust_lib,
             edition = proto_toolchain.edition,
             rustc_env = {},
+            is_test = False,
         ),
         output_hash = output_hash,
     )
@@ -220,6 +221,12 @@ rust_proto_library = rule(
             default = PROTO_COMPILE_DEPS,
         ),
         "_cc_toolchain": attr.label(default = "@bazel_tools//tools/cpp:current_cc_toolchain"),
+        "_process_wrapper": attr.label(
+            default = "@io_bazel_rules_rust//util/process_wrapper",
+            executable = True,
+            allow_single_file = True,
+            cfg = "exec",
+        ),
         "_optional_output_wrapper": attr.label(
             executable = True,
             cfg = "host",
@@ -227,11 +234,7 @@ rust_proto_library = rule(
                 "@io_bazel_rules_rust//proto:optional_output_wrapper",
             ),
         ),
-        "_whitelist_function_transition": attr.label(
-            default = "//tools/whitelists/function_transition_whitelist",
-        ),
     },
-    cfg = proc_macro_host_transition,
     fragments = ["cpp"],
     host_fragments = ["cpp"],
     toolchains = [
@@ -284,6 +287,12 @@ rust_grpc_library = rule(
             default = GRPC_COMPILE_DEPS,
         ),
         "_cc_toolchain": attr.label(default = "@bazel_tools//tools/cpp:current_cc_toolchain"),
+        "_process_wrapper": attr.label(
+            default = "@io_bazel_rules_rust//util/process_wrapper",
+            executable = True,
+            allow_single_file = True,
+            cfg = "exec",
+        ),
         "_optional_output_wrapper": attr.label(
             executable = True,
             cfg = "host",
@@ -291,11 +300,7 @@ rust_grpc_library = rule(
                 "@io_bazel_rules_rust//proto:optional_output_wrapper",
             ),
         ),
-        "_whitelist_function_transition": attr.label(
-            default = "//tools/whitelists/function_transition_whitelist",
-        ),
     },
-    cfg = proc_macro_host_transition,
     fragments = ["cpp"],
     host_fragments = ["cpp"],
     toolchains = [
