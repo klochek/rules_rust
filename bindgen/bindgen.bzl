@@ -93,6 +93,16 @@ def _rust_bindgen_impl(ctx):
     args.add_all(quote_include_directories, before_each = "-iquote")
     args.add_all(system_include_directories, before_each = "-isystem")
     args.add_all(clang_args)
+
+    env = {
+        "RUST_BACKTRACE": "1",
+        "CLANG_PATH": clang_bin.path,
+        "LIBCLANG_PATH": libclang_dir,
+    }
+
+    if libstdcxx:
+        env["LD_LIBRARY_PATH"] = ":".join([f.dirname for f in get_libs_for_static_executable(libstdcxx).to_list()])
+
     ctx.actions.run(
         executable = bindgen_bin,
         inputs = depset(
@@ -100,29 +110,34 @@ def _rust_bindgen_impl(ctx):
             transitive = [
                 cc_lib[CcInfo].compilation_context.headers,
                 get_libs_for_static_executable(libclang),
+            ] + [
                 get_libs_for_static_executable(libstdcxx),
-            ],
+            ] if libstdcxx else [],
         ),
         outputs = [unformatted_output],
         mnemonic = "RustBindgen",
         progress_message = "Generating bindings for {}..".format(header.path),
-        env = {
-            "RUST_BACKTRACE": "1",
-            "CLANG_PATH": clang_bin.path,
-            # Bindgen loads libclang at runtime, which also needs libstdc++, so we setup LD_LIBRARY_PATH
-            "LIBCLANG_PATH": libclang_dir,
-            "LD_LIBRARY_PATH": ":".join([f.dirname for f in get_libs_for_static_executable(libstdcxx).to_list()]),
-        },
+        env = env,
         arguments = [args],
         tools = [clang_bin],
     )
 
     if rustfmt_bin:
-        ctx.actions.run_shell(
-            inputs = depset([rustfmt_bin, unformatted_output]),
+        rustfmt_args = ctx.actions.args()
+        rustfmt_args.add("--stdout-file", output.path)
+        rustfmt_args.add("--")
+        rustfmt_args.add(rustfmt_bin.path)
+        rustfmt_args.add("--emit", "stdout")
+        rustfmt_args.add("--quiet")
+        rustfmt_args.add(unformatted_output.path)
+
+        ctx.actions.run(
+            executable = ctx.executable._process_wrapper,
+            inputs = [unformatted_output],
             outputs = [output],
-            command = "{} --emit stdout --quiet {} > {}".format(rustfmt_bin.path, unformatted_output.path, output.path),
+            arguments = [rustfmt_args],
             tools = [rustfmt_bin],
+            mnemonic = "Rustfmt",
         )
 
 rust_bindgen = rule(
@@ -142,6 +157,12 @@ rust_bindgen = rule(
         ),
         "clang_flags": attr.string_list(
             doc = "Flags to pass directly to the clang executable.",
+        ),
+        "_process_wrapper": attr.label(
+            default = "@io_bazel_rules_rust//util/process_wrapper",
+            executable = True,
+            allow_single_file = True,
+            cfg = "exec",
         ),
     },
     outputs = {"out": "%{name}.rs"},

@@ -4,9 +4,12 @@
 # bazel
 /bazel-*
 /examples/bazel-*
+/docs/bazel-*
 
 # rustfmt
 *.rs.bk
 
 # protobuf cargo-raze files
 /proto/raze/target
+
+node_modules
