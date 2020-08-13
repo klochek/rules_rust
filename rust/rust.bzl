@@ -19,6 +19,7 @@ load(
     _rust_library = "rust_library",
     _rust_test = "rust_test",
     _rust_analyzer_project = "rust_analyzer_project",
+    _rust_test_binary = "rust_test_binary",
 )
 load(
     "@io_bazel_rules_rust//rust:private/rustdoc.bzl",
@@ -27,6 +28,11 @@ load(
 load(
     "@io_bazel_rules_rust//rust:private/rustdoc_test.bzl",
     _rust_doc_test = "rust_doc_test",
+)
+load(
+    "@io_bazel_rules_rust//rust:private/clippy.bzl",
+    _rust_clippy_aspect = "rust_clippy_aspect",
+    _rust_clippy = "rust_clippy",
 )
 
 load(
@@ -49,6 +55,9 @@ rust_binary = _rust_binary
 rust_test = _rust_test
 """ See @io_bazel_rules_rust//rust:private/rust.bzl for a complete description. """
 
+rust_test_binary = _rust_test_binary
+""" See @io_bazel_rules_rust//rust:private/rust.bzl for a complete description. """
+
 rust_benchmark = _rust_benchmark
 """ See @io_bazel_rules_rust//rust:private/rust.bzl for a complete description. """
 
@@ -66,3 +75,10 @@ rustc_compile_action = _rustc_compile_action
 CrateInfo = _CrateInfo
 
 find_toolchain = _find_toolchain
+""" See @io_bazel_rules_rust//rust:private/rustdoc_test.bzl for a complete description. """
+
+rust_clippy_aspect = _rust_clippy_aspect
+""" See @io_bazel_rules_rust//rust:private/clippy.bzl for a complete description. """
+
+rust_clippy = _rust_clippy
+""" See @io_bazel_rules_rust//rust:private/clippy.bzl for a complete description. """

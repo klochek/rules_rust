@@ -14,43 +14,22 @@
 
 load("@io_bazel_rules_rust//rust:private/rustc.bzl", "CrateInfo", "rustc_compile_action")
 load("@io_bazel_rules_rust//rust:private/utils.bzl", "find_toolchain")
-load("@io_bazel_rules_rust//rust:private/transitions.bzl", "proc_macro_host_transition")
-
-_OLD_INLINE_TEST_CRATE_MSG = """
---------------------------------------------------------------------------------
-Testing crates with inline `#[cfg(test)]` attributes is now handled with the
-`crate` attribute in `rust_test`:
-
-This means you should migrate from:
-
-```
-rust_test(
-    name = "{name}",
-    deps = ["{dep}"],
-    ...
-)
-```
-
-to the following:
-```
-rust_test(
-    name = "{name}",
-    crate = "{dep}",
-    ...
-```
-
-See https://github.com/bazelbuild/rules_rust/pull/203 for more details
---------------------------------------------------------------------------------
-
-"""
 
 # TODO(marco): Separate each rule into its own file.
 
 def _determine_output_hash(lib_rs):
     return repr(hash(lib_rs.path))
 
+def _deprecated_attributes(ctx):
+    if getattr(ctx.attr, "out_dir_tar", None):
+        fail(ctx, "".join([
+            "`out_dir_tar` is no longer supported, please use cargo/cargo_build_script.bzl ",
+            "instead. If you used `cargo raze`, please use version 0.3.3 or later.",
+        ]))
+
 def _determine_lib_name(name, crate_type, toolchain, lib_hash = ""):
     extension = None
+    prefix = ""
     if crate_type in ("dylib", "cdylib", "proc-macro"):
         extension = toolchain.dylib_ext
     elif crate_type == "staticlib":
@@ -58,6 +37,7 @@ def _determine_lib_name(name, crate_type, toolchain, lib_hash = ""):
     elif crate_type in ("lib", "rlib"):
         # All platforms produce 'rlib' here
         extension = ".rlib"
+        prefix = "lib"
     elif crate_type == "bin":
         fail("crate_type of 'bin' was detected in a rust_library. Please compile " +
              "this crate as a rust_binary instead.")
@@ -66,30 +46,39 @@ def _determine_lib_name(name, crate_type, toolchain, lib_hash = ""):
         fail(("Unknown crate_type: {}. If this is a cargo-supported crate type, " +
               "please file an issue!").format(crate_type))
 
-    return "lib{name}-{lib_hash}{extension}".format(
+    prefix = "lib"
+    if (toolchain.target_triple.find("windows") != -1) and crate_type not in ("lib", "rlib"):
+        prefix = ""
+
+    return "{prefix}{name}-{lib_hash}{extension}".format(
+        prefix = prefix,
         name = name,
         lib_hash = lib_hash,
         extension = extension,
     )
 
-def _get_edition(ctx, toolchain):
-    if getattr(ctx.attr, "edition"):
-        return ctx.attr.edition
+def get_edition(attr, toolchain):
+    if getattr(attr, "edition"):
+        return attr.edition
     else:
         return toolchain.default_edition
 
-def _crate_root_src(ctx, file_name = "lib.rs"):
+def crate_root_src(attr, srcs, file_name = "lib.rs"):
     """Finds the source file for the crate root."""
-    srcs = ctx.files.srcs
 
-    crate_root = (
-        ctx.file.crate_root or
-        (srcs[0] if len(srcs) == 1 else None) or
-        _shortest_src_with_basename(srcs, file_name) or
-        _shortest_src_with_basename(srcs, ctx.attr.name + ".rs")
-    )
+    crate_root = None
+    if hasattr(attr, "crate_root"):
+        if attr.crate_root:
+            crate_root = attr.crate_root.files.to_list()[0]
+
     if not crate_root:
-        file_names = [file_name, ctx.attr.name + ".rs"]
+        crate_root = (
+            (srcs[0] if len(srcs) == 1 else None) or
+            _shortest_src_with_basename(srcs, file_name) or
+            _shortest_src_with_basename(srcs, attr.name + ".rs")
+        )
+    if not crate_root:
+        file_names = [file_name, attr.name + ".rs"]
         fail("No {} source file found.".format(" or ".join(file_names)), "srcs")
     return crate_root
 
@@ -106,7 +95,8 @@ def _shortest_src_with_basename(srcs, basename):
 
 def _rust_library_impl(ctx):
     # Find lib.rs
-    lib_rs = _crate_root_src(ctx)
+    lib_rs = crate_root_src(ctx.attr, ctx.files.srcs)
+    _deprecated_attributes(ctx)
 
     toolchain = find_toolchain(ctx)
 
@@ -131,10 +121,12 @@ def _rust_library_impl(ctx):
             root = lib_rs,
             srcs = ctx.files.srcs,
             deps = ctx.attr.deps,
+            proc_macro_deps = ctx.attr.proc_macro_deps,
             aliases = ctx.attr.aliases,
             output = rust_lib,
-            edition = _get_edition(ctx, toolchain),
+            edition = get_edition(ctx.attr, toolchain),
             rustc_env = ctx.attr.rustc_env,
+            is_test = False,
         ),
         output_hash = output_hash,
     )
@@ -143,28 +135,29 @@ def _rust_binary_impl(ctx):
     toolchain = find_toolchain(ctx)
     crate_name = ctx.label.name.replace("-", "_")
 
-    if (toolchain.target_arch == "wasm32"):
-        output = ctx.actions.declare_file(crate_name + ".wasm")
-    else:
-        output = ctx.actions.declare_file(crate_name)
+    output = ctx.actions.declare_file(ctx.label.name + toolchain.binary_ext)
+
+    crate_type = getattr(ctx.attr, "crate_type")
 
     return rustc_compile_action(
         ctx = ctx,
         toolchain = toolchain,
         crate_info = CrateInfo(
             name = crate_name,
-            type = "bin",
-            root = _crate_root_src(ctx, "main.rs"),
+            type = crate_type,
+            root = crate_root_src(ctx.attr, ctx.files.srcs, file_name = "main.rs"),
             srcs = ctx.files.srcs,
             deps = ctx.attr.deps,
+            proc_macro_deps = ctx.attr.proc_macro_deps,
             aliases = ctx.attr.aliases,
             output = output,
-            edition = _get_edition(ctx, toolchain),
+            edition = get_edition(ctx.attr, toolchain),
             rustc_env = ctx.attr.rustc_env,
+            is_test = False,
         ),
     )
 
-def _rust_test_common(ctx, test_binary):
+def _rust_test_common(ctx, toolchain, output):
     """
     Builds a Rust test binary.
 
@@ -172,42 +165,41 @@ def _rust_test_common(ctx, test_binary):
         ctx: The ctx object for the current target.
         test_binary: The File object for the test binary.
     """
-    toolchain = find_toolchain(ctx)
+    _deprecated_attributes(ctx)
+
+    crate_name = ctx.label.name.replace("-", "_")
 
     if ctx.attr.crate:
         # Target is building the crate in `test` config
         # Build the test binary using the dependency's srcs.
         crate = ctx.attr.crate[CrateInfo]
         target = CrateInfo(
-            name = test_binary.basename,
+            name = crate_name,
             type = crate.type,
             root = crate.root,
             srcs = crate.srcs + ctx.files.srcs,
             deps = crate.deps + ctx.attr.deps,
+            proc_macro_deps = crate.proc_macro_deps + ctx.attr.proc_macro_deps,
             aliases = ctx.attr.aliases,
-            output = test_binary,
+            output = output,
             edition = crate.edition,
             rustc_env = ctx.attr.rustc_env,
+            is_test = True,
         )
-    elif len(ctx.attr.deps) == 1 and len(ctx.files.srcs) == 0:
-        dep = ctx.attr.deps[0].label
-        msg = _OLD_INLINE_TEST_CRATE_MSG.format(
-            name = test_binary.basename,
-            dep = dep if ctx.label.package != dep.package else ":" + dep.name,
-        )
-        fail(msg)
     else:
         # Target is a standalone crate. Build the test binary as its own crate.
         target = CrateInfo(
-            name = test_binary.basename,
+            name = crate_name,
             type = "lib",
-            root = _crate_root_src(ctx),
+            root = crate_root_src(ctx.attr, ctx.files.srcs),
             srcs = ctx.files.srcs,
             deps = ctx.attr.deps,
+            proc_macro_deps = ctx.attr.proc_macro_deps,
             aliases = ctx.attr.aliases,
-            output = test_binary,
-            edition = _get_edition(ctx, toolchain),
+            output = output,
+            edition = get_edition(ctx.attr, toolchain),
             rustc_env = ctx.attr.rustc_env,
+            is_test = True,
         )
 
     return rustc_compile_action(
@@ -218,7 +210,13 @@ def _rust_test_common(ctx, test_binary):
     )
 
 def _rust_test_impl(ctx):
-    return _rust_test_common(ctx, ctx.outputs.executable)
+    toolchain = find_toolchain(ctx)
+
+    output = ctx.actions.declare_file(
+        ctx.label.name + toolchain.binary_ext,
+    )
+
+    return _rust_test_common(ctx, toolchain, output)
 
 
 ProjectInfo = provider(
@@ -249,32 +247,53 @@ def _rust_analyzer_project_impl(ctx):
     #return ProjectInfo(project_file=depset([proj_file]))
 
 def _rust_benchmark_impl(ctx):
-    bench_script = ctx.outputs.executable
+    _deprecated_attributes(ctx)
+
+    toolchain = find_toolchain(ctx)
 
     # Build the underlying benchmark binary.
     bench_binary = ctx.actions.declare_file(
-        "{}_bin".format(bench_script.basename),
+        "{}_bin{}".format(ctx.label.name, toolchain.binary_ext),
         sibling = ctx.configuration.bin_dir,
     )
-    info = _rust_test_common(ctx, bench_binary)
+    info = _rust_test_common(ctx, toolchain, bench_binary)
 
-    # Wrap the benchmark to run it as cargo would.
-    ctx.actions.write(
-        output = bench_script,
-        content = "\n".join([
-            "#!/usr/bin/env bash",
-            "set -e",
-            "{} --bench".format(bench_binary.short_path),
-        ]),
-        is_executable = True,
-    )
+    if toolchain.exec_triple.find("windows") != -1:
+        bench_script = ctx.actions.declare_file(
+            ctx.label.name + ".bat",
+        )
+
+        # Wrap the benchmark to run it as cargo would.
+        ctx.actions.write(
+            output = bench_script,
+            content = "{} --bench || exit 1".format(bench_binary.short_path),
+            is_executable = True,
+        )
+    else:
+        bench_script = ctx.actions.declare_file(
+            ctx.label.name + ".sh",
+        )
+
+        # Wrap the benchmark to run it as cargo would.
+        ctx.actions.write(
+            output = bench_script,
+            content = "\n".join([
+                "#!/usr/bin/env bash",
+                "set -e",
+                "{} --bench".format(bench_binary.short_path),
+            ]),
+            is_executable = True,
+        )
 
     runfiles = ctx.runfiles(
         files = info.runfiles + [bench_binary],
         collect_data = True,
     )
 
-    return struct(runfiles = runfiles)
+    return struct(
+        runfiles = runfiles,
+        executable = bench_script,
+    )
 
 def _tidy(doc_string):
     """Tidy excess whitespace in docstrings to not break index.md"""
@@ -323,6 +342,17 @@ _rust_common_attrs = {
             linking a native library.
         """),
     ),
+    # Previously `proc_macro_deps` were a part of `deps`, and then proc_macro_host_transition was
+    # used into cfg="host" using `@local_config_platform//:host`.
+    # This fails for remote execution, which needs cfg="exec", and there isn't anything like
+    # `@local_config_platform//:exec` exposed.
+    "proc_macro_deps": attr.label_list(
+        doc = _tidy("""
+            List of `rust_library` targets with kind `proc-macro` used to help build this library target.
+        """),
+        cfg = "exec",
+        providers = [CrateInfo],
+    ),
     "aliases": attr.label_keyed_string_dict(
         doc = _tidy("""
             Remap crates to a new name or moniker for linkage to this target
@@ -355,19 +385,19 @@ _rust_common_attrs = {
         default = "0.0.0",
     ),
     "out_dir_tar": attr.label(
-        doc = _tidy("""
-            An optional tar or tar.gz file unpacked and passed as OUT_DIR.
-
-            Many library crates in the Rust ecosystem require sources to be provided
-            to them in the form of an OUT_DIR argument. This argument can be used to
-            supply the contents of this directory.
-        """),
+        doc = "__Deprecated__, do not use, see [#cargo_build_script] instead.",
         allow_single_file = [
             ".tar",
             ".tar.gz",
         ],
     ),
     "_cc_toolchain": attr.label(default = "@bazel_tools//tools/cpp:current_cc_toolchain"),
+    "_process_wrapper": attr.label(
+        default = "@io_bazel_rules_rust//util/process_wrapper",
+        executable = True,
+        allow_single_file = True,
+        cfg = "exec",
+    ),
 }
 
 _rust_library_attrs = {
@@ -379,9 +409,6 @@ _rust_library_attrs = {
             The exact output file will depend on the toolchain used.
         """),
         default = "rlib",
-    ),
-    "_whitelist_function_transition": attr.label(
-        default = "//tools/whitelists/function_transition_whitelist",
     ),
 }
 
@@ -403,7 +430,6 @@ rust_library = rule(
                  _rust_library_attrs.items()),
     fragments = ["cpp"],
     host_fragments = ["cpp"],
-    cfg = proc_macro_host_transition,
     toolchains = [
         "@io_bazel_rules_rust//rust:toolchain",
         "@bazel_tools//tools/cpp:toolchain_type",
@@ -479,9 +505,13 @@ _rust_binary_attrs = {
         doc = _tidy("""
             Link script to forward into linker via rustc options.
         """),
-        cfg = "host",
+        cfg = "exec",
         allow_single_file = True,
     ),
+    "crate_type": attr.string(
+        default = "bin",
+    ),
+    "out_binary": attr.bool(),
 }
 
 rust_binary = rule(
@@ -754,6 +784,30 @@ Foo
 """,
 )
 
+rust_test_binary = rule(
+    _rust_test_impl,
+    attrs = dict(_rust_common_attrs.items() +
+                 _rust_test_attrs.items()),
+    executable = True,
+    fragments = ["cpp"],
+    host_fragments = ["cpp"],
+    toolchains = [
+        "@io_bazel_rules_rust//rust:toolchain",
+        "@bazel_tools//tools/cpp:toolchain_type",
+    ],
+    doc = """
+Builds a Rust test binary, without marking this rule as a Bazel test.
+
+**Warning**: This rule is currently experimental.
+
+This should be used when you want to run the test binary from a different test
+rule (such as [`sh_test`](https://docs.bazel.build/versions/master/be/shell.html#sh_test)),
+and know that running the test binary directly will fail.
+
+See `rust_test` for example usage.
+""",
+)
+
 rust_benchmark = rule(
     _rust_benchmark_impl,
     attrs = _rust_common_attrs,
@@ -824,7 +878,7 @@ fn bench_fibonacci(b: &mut Bencher) {
 
 To build the benchmark test, add a `rust_benchmark` target:
 
-`fibonacci/BUILD`:\
+`fibonacci/BUILD`:
 ```python
 package(default_visibility = ["//visibility:public"])
 
