@@ -391,6 +391,12 @@ _rust_common_attrs = {
             ".tar.gz",
         ],
     ),
+    "gen_src_files": attr.label_list(
+        doc = _tidy("""
+        FIXME
+        """),
+        allow_files = True,
+    ),
     "_cc_toolchain": attr.label(default = "@bazel_tools//tools/cpp:current_cc_toolchain"),
     "_process_wrapper": attr.label(
         default = "@io_bazel_rules_rust//util/process_wrapper",

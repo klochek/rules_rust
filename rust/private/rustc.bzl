@@ -340,6 +340,12 @@ def construct_arguments(
     if out_dir != None:
         env["OUT_DIR"] = "${pwd}/" + out_dir
 
+    if ctx.attr.gen_src_files != None:
+        for target in ctx.attr.gen_src_files:
+            for file in target.files.to_list():
+                # always relative to root/crate/src?
+                env[file.basename] = "../../../" + file.path
+
     # Handle that the binary name and crate name may be different.
     #
     # If a target name contains a - then cargo (and rules_rust) will generate a
