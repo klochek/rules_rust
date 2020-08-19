@@ -5,12 +5,15 @@ load("@bazel_tools//tools/cpp:toolchain_utils.bzl", "find_cpp_toolchain")
 
 def _cargo_build_script_run(ctx, script):
     toolchain = find_toolchain(ctx)
+
+    bf = ctx.attr.things[0].files.to_list()[0].dirname
+
     out_dir = ctx.actions.declare_directory(ctx.label.name + ".out_dir")
     env_out = ctx.actions.declare_file(ctx.label.name + ".env")
     dep_env_out = ctx.actions.declare_file(ctx.label.name + ".depenv")
     flags_out = ctx.actions.declare_file(ctx.label.name + ".flags")
     link_flags = ctx.actions.declare_file(ctx.label.name + ".linkflags")
-    manifest_dir = "%s.runfiles/%s" % (script.path, ctx.label.workspace_name or ctx.workspace_name)
+    manifest_dir = "%s.runfiles/%s/%s" % (script.path, ctx.label.workspace_name or ctx.workspace_name, bf)
     compilation_mode_opt_level = get_compilation_mode_opts(ctx, toolchain).opt_level
 
     crate_name = ctx.attr.crate_name
@@ -141,6 +144,7 @@ _build_script_run = rule(
             cfg = "host",
         ),
         "deps": attr.label_list(),
+        "things": attr.label_list(allow_files=True),
     },
     fragments = ["cpp"],
     toolchains = [
@@ -222,4 +226,5 @@ def cargo_build_script(
         version = version,
         build_script_env = build_script_env,
         deps = deps,
+        things = kwargs["srcs"],
     )
