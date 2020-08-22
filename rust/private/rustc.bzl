@@ -334,9 +334,9 @@ def construct_arguments(
     # `exec_root`. Since we cannot (seemingly) get the `exec_root` from skylark, we cheat a little
     # and use `${pwd}` which resolves the `exec_root` at action execution time.
     args.add("--subst", "pwd=${pwd}")
-    
+
     env["CARGO_MANIFEST_DIR"] = "${pwd}/" + ctx.build_file_path[:ctx.build_file_path.rfind("/")]
-    
+
     if out_dir != None:
         env["OUT_DIR"] = "${pwd}/" + out_dir
 
@@ -395,6 +395,7 @@ def construct_arguments(
 
     # Gets the paths to the folders containing the standard library (or libcore)
     rust_lib_paths = depset([file.dirname for file in toolchain.rust_lib.files.to_list()]).to_list()
+
     # Tell Rustc where to find the standard library
     args.add_all(rust_lib_paths, before_each = "-L", format_each = "%s")
 
@@ -504,14 +505,19 @@ def rustc_compile_action(
         ),
     )
 
+    runfiles = []
+    for target in getattr(ctx.attr, "runfiles", []):
+        for file in target.files.to_list():
+            runfiles.append(file)
+
     runfiles = ctx.runfiles(
-        files = dep_info.transitive_dylibs.to_list() + getattr(ctx.files, "data", []),
+        files = dep_info.transitive_dylibs.to_list() + getattr(ctx.files, "data", []) + runfiles,
         collect_data = True,
     )
 
     # project file generation (intermediate form) for eventual rust analyzer
     proj_file = ctx.actions.declare_file(
-        "{}.project".format(ctx.attr.name), 
+        "{}.project".format(ctx.attr.name),
     )
 
     proj_outs = "//" + ctx.label.package + "_" + ctx.label.name + ":" + crate_info.root.path + "\n" + "\n".join([("//" + dep.label.package + "_" + dep.label.name + ":" + dep.label.name) for dep in ctx.attr.deps])
@@ -529,7 +535,6 @@ def rustc_compile_action(
 
     all_analyzer_files = depset([proj_file], transitive = transitive)
     ###
-
 
     out_binary = False
     if hasattr(ctx.attr, "out_binary"):
@@ -583,6 +588,7 @@ def establish_cc_info(ctx, crate_info, toolchain, cc_toolchain, feature_configur
     cc_infos.append(CcInfo(linking_context = linking_context))
 
     return [cc_common.merge_cc_infos(cc_infos = cc_infos)]
+
 def add_edition_flags(args, crate):
     if crate.edition != "2015":
         args.add("--edition={}".format(crate.edition))
@@ -599,6 +605,7 @@ def _create_extra_input_args(ctx, file, build_info, dep_info):
     if build_info:
         out_dir = build_info.out_dir.path
         build_env_file = build_info.rustc_env.path
+
         # out_dir will be added as input by the transitive_build_infos loop below.
         build_flags_files.append(build_info.flags.path)
 

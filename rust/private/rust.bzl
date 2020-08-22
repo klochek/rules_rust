@@ -518,6 +518,9 @@ _rust_binary_attrs = {
         default = "bin",
     ),
     "out_binary": attr.bool(),
+    "runfiles" : attr.label_list(
+        allow_files = True,
+    ),
 }
 
 rust_binary = rule(
