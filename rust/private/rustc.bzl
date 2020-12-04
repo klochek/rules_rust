@@ -520,7 +520,9 @@ def rustc_compile_action(
         "{}.project".format(ctx.attr.name),
     )
 
-    proj_outs = "//" + ctx.label.package + "_" + ctx.label.name + ":" + crate_info.root.path + "\n" + "\n".join([("//" + dep.label.package + "_" + dep.label.name + ":" + dep.label.name) for dep in ctx.attr.deps])
+    proj_outs = "//" + ctx.label.package + "_" + ctx.label.name + ":" + crate_info.root.path + "\n" + "\n".join(
+        [("//" + dep.label.package + "_" + dep.label.name + ":" + dep.label.name) for dep in ctx.attr.deps] +
+        [("//" + dep.label.package + "_" + dep.label.name + ":" + dep.label.name) for dep in ctx.attr.proc_macro_deps])
 
     ctx.actions.write(
         output = proj_file,

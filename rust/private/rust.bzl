@@ -233,7 +233,8 @@ def _rust_analyzer_project_impl(ctx):
     crate_root = "src/lib.rs"
     if ctx.attr.crate_root:
         crate_root = ctx.attr.crate_root.label.name
-    outs = ctx.label.package + "/" + crate_root + "\n" + "\n".join([(dep.label.package + ":" + dep.label.name) for dep in ctx.attr.deps])
+    outs = ctx.label.package + "/" + crate_root + "\n" + "\n".join(
+        [(dep.label.package + ":" + dep.label.name) for dep in ctx.attr.proc_macro_deps] + [(dep.label.package + ":" + dep.label.name) for dep in ctx.attr.deps])
 
     #print(outs)
 
